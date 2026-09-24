@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>GLI Dashboard</title>
+<style>
+:root{--bg:#10263f;--card:#fff;--ink:#12332b;--mut:#5b716c;--pri:#0f5c4a;--bd:#d6e4df;--bad:#b3261e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1a2b;--card:#15222e;--ink:#e3eeea;--mut:#9fb3ad;--bd:#2a3a45;--bad:#ff8a80;--warn:#f0c46b}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;color:var(--ink);padding:16px}
+.card{background:var(--card);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.3);padding:28px 26px;width:100%;max-width:440px}
+h1{font-size:19px;margin:0 0 2px;text-align:center}
+.sub{color:var(--mut);text-align:center;margin:0 0 18px;font-size:13px}
+.btn{display:block;width:100%;border:0;border-radius:10px;padding:11px 14px;font:inherit;font-weight:600;cursor:pointer;background:var(--pri);color:#fff}
+.btn.sec{background:transparent;color:var(--ink);border:1px solid var(--bd)}
+.btn:disabled{opacity:.55;cursor:default}
+.msg{margin:12px 0 0;font-size:13px}
+.msg.bad{color:var(--bad)}.msg.warn{color:var(--warn)}
+.bar{height:8px;border-radius:6px;background:var(--bd);overflow:hidden;margin:14px 0 6px}
+.bar i{display:block;height:100%;width:0;background:var(--pri);transition:width .2s}
+.who{font-size:12px;color:var(--mut);text-align:center;margin-top:14px;word-break:break-all}
+.who a{color:inherit}
+.adm{border-top:1px solid var(--bd);margin-top:18px;padding-top:14px}
+.adm h2{font-size:14px;margin:0 0 6px}
+.adm p{color:var(--mut);font-size:12.5px;margin:0 0 10px}
+.row{display:flex;gap:8px;margin-top:8px}.row .btn{flex:1}
+input[type=file]{width:100%;font:inherit;font-size:12.5px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="card" id="L">
+  <h1>🔐 GLI Dashboard</h1>
+  <p class="sub">Grandline Innovation · Accounting Suite</p>
+  <div id="Lbody"><p class="msg">Loading…</p></div>
+</div>
+<script>
+/* Public sign-in shell for the GLI Dashboard.
+   This page holds NO company data. The dashboard itself is stored in the Firebase
+   Realtime Database under /gli_app, readable only by signed-in users listed in /gli_acl.
+   It is split into content-addressed pieces (/gli_app/seg/<sha>) so a new build only
+   uploads/downloads the pieces that changed; each device caches pieces in IndexedDB.
+   Open with #admin to publish a new build or clean up unused pieces (admin only). */
+(function(){
+var FIREBASE_CONFIG={
+  apiKey: "AIzaSyB00XbrR8dI-NlJYqpkmecenwHofzcM3-Y",
+  authDomain: "grandline-dashboard-company.firebaseapp.com",
+  databaseURL: "https://grandline-dashboard-company-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "grandline-dashboard-company",
+  storageBucket: "grandline-dashboard-company.firebasestorage.app",
+  messagingSenderId: "744005686834",
+  appId: "1:744005686834:web:f6c5b38f8f2c607b978e2b",
+  measurementId: "G-E9XWXV1CGN"
+};
+var SDK='https://www.gstatic.com/firebasejs/10.12.2/';
+var body=document.getElementById('Lbody');
+var S={user:null,role:null,unsub:null,adminView:/(^|#|&)admin\b/.test(location.hash)};
+
+function esc(v){return (''+(v==null?'':v)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function key(e){return (''+(e||'')).toLowerCase().split('.').join(',');}
+function show(h){body.innerHTML=h;}
+function fail(t){show('<p class="msg bad">'+esc(t)+'</p><button class="btn sec" style="margin-top:12px" onclick="location.reload()">Try again</button>');}
+function progress(label,frac){
+  var b=document.getElementById('Lbar');
+  if(!b){show('<p class="msg" id="Llab"></p><div class="bar"><i id="Lbar"></i></div>');b=document.getElementById('Lbar');}
+  document.getElementById('Llab').textContent=label;b.style.width=Math.round(Math.max(0,Math.min(1,frac))*100)+'%';
+}
+function load(src){return new Promise(function(ok,no){var s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=function(){no(new Error('Could not load '+src));};document.head.appendChild(s);});}
+
+/* ---------- gzip + base64 ---------- */
+function gz(text){return new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();}
+function gunz(bytes){return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();}
+function b64(buf){var u=new Uint8Array(buf),s='',CH=0x8000;for(var i=0;i<u.length;i+=CH)s+=String.fromCharCode.apply(null,u.subarray(i,i+CH));return btoa(s);}
+function unb64(str){var s=atob(str),u=new Uint8Array(s.length);for(var i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u;}
+function sha(text){return crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)).then(function(h){return Array.from(new Uint8Array(h)).slice(0,16).map(function(x){return ('0'+x.toString(16)).slice(-2);}).join('');});}
+
+/* ---------- IndexedDB piece cache ---------- */
+var _db=null;
+function idb(){if(_db)return _db;_db=new Promise(function(ok){try{var r=indexedDB.open('gli_loader',1);r.onupgradeneeded=function(){r.result.createObjectStore('seg');};r.onsuccess=function(){ok(r.result);};r.onerror=function(){ok(null);};}catch(e){ok(null);}});return _db;}
+function cget(id){return idb().then(function(db){if(!db)return null;return new Promise(function(ok){try{var q=db.transaction('seg').objectStore('seg').get(id);q.onsuccess=function(){ok(q.result||null);};q.onerror=function(){ok(null);};}catch(e){ok(null);}});});}
+function cput(id,text){return idb().then(function(db){if(!db)return;return new Promise(function(ok){try{var t=db.transaction('seg','readwrite');t.objectStore('seg').put(text,id);t.oncomplete=ok;t.onerror=ok;}catch(e){ok();}});});}
+function cprune(keep){return idb().then(function(db){if(!db)return;return new Promise(function(ok){try{var t=db.transaction('seg','readwrite'),st=t.objectStore('seg'),q=st.getAllKeys();q.onsuccess=function(){(q.result||[]).forEach(function(k){if(!keep[k])st.delete(k);});};t.oncomplete=ok;t.onerror=ok;}catch(e){ok();}});});}
+
+/* ---------- split a build into content-defined pieces ---------- */
+var MAXSEG=3*1024*1024, SOFT=512*1024;
+function fnv(s){var h=0x811c9dc5;for(var i=0;i<s.length;i+=7){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+function split(html){
+  var lines=html.split(/(?<=\n)/),out=[],cur='';
+  function flush(){if(cur){out.push(cur);cur='';}}
+  for(var i=0;i<lines.length;i++){var ln=lines[i];
+    if(ln.length>MAXSEG){flush();for(var p=0;p<ln.length;p+=MAXSEG)out.push(ln.slice(p,p+MAXSEG));continue;}
+    if(cur.length+ln.length>MAXSEG)flush();
+    cur+=ln;
+    if(cur.length>=SOFT&&(fnv(ln)&15)===0)flush();
+  }
+  flush();return out;
+}
+
+/* ---------- auth ---------- */
+function start(){
+  if(!FIREBASE_CONFIG)return fail('Firebase is not configured in this page.');
+  if(!window.CompressionStream||!window.crypto||!crypto.subtle)return fail('This browser is too old. Please use the latest Chrome, Edge or Safari.');
+  load(SDK+'firebase-app-compat.js').then(function(){return load(SDK+'firebase-database-compat.js');}).then(function(){return load(SDK+'firebase-auth-compat.js');}).then(function(){
+    if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);
+    firebase.auth().getRedirectResult().catch(function(){});
+    S.unsub=firebase.auth().onAuthStateChanged(onUser);
+  }).catch(function(e){fail(e.message+' — check the internet connection.');});
+}
+function signInView(note){
+  show('<p class="sub" style="margin-bottom:14px">Sign in with an authorised Google account.</p>'
+    +'<button class="btn" id="Lsign">Sign in with Google</button>'
+    +(note?'<p class="msg bad">'+esc(note)+'</p>':''));
+  document.getElementById('Lsign').onclick=function(){
+    var p=new firebase.auth.GoogleAuthProvider();p.setCustomParameters({prompt:'select_account'});
+    firebase.auth().signInWithPopup(p).catch(function(e){var c=(e&&e.code)||'';
+      if(c==='auth/popup-blocked')return firebase.auth().signInWithRedirect(p);
+      if(c==='auth/popup-closed-by-user'||c==='auth/cancelled-popup-request')return;
+      signInView(c==='auth/unauthorized-domain'?('This address ('+location.hostname+') is not an authorised domain in Firebase Authentication.'):('Sign-in failed: '+((e&&e.message)||c)));});
+  };
+}
+var _denied='';
+function onUser(u){
+  if(!u){S.user=null;signInView(_denied?(_denied+' has no access. Ask the admin to add this email.'):'');return;}
+  show('<p class="msg">Checking access…</p>');
+  firebase.database().ref('gli_acl/'+key(u.email)).once('value').then(function(sn){
+    var r=sn.val();
+    if(r!=='admin'&&r!=='editor'&&r!=='viewer'){_denied=u.email;firebase.auth().signOut();return;}
+    S.user=u;S.role=r;_denied='';
+    if(S.adminView&&r==='admin')adminView();else launch();
+  },function(){_denied=u.email;firebase.auth().signOut();});
+}
+function whoLine(){return '<p class="who">'+esc(S.user.email)+' · '+esc(S.role)
+  +' · <a href="#" id="Lout">Sign out</a>'+(S.role==='admin'&&!S.adminView?' · <a href="#admin" id="Ladm">Admin</a>':'')+'</p>';}
+function bindWho(){var o=document.getElementById('Lout');if(o)o.onclick=function(e){e.preventDefault();firebase.auth().signOut().then(function(){location.hash='';location.reload();});};
+  var a=document.getElementById('Ladm');if(a)a.onclick=function(){setTimeout(function(){location.reload();},0);};}
+
+/* ---------- download + launch ---------- */
+function launch(){
+  var ref=firebase.database().ref('gli_app');
+  progress('Checking for the latest version…',0.02);
+  ref.child('manifest').once('value').then(function(sn){
+    var m=sn.val();
+    if(!m||!m.segs||!m.segs.length){
+      show('<p class="msg warn">No dashboard build has been published yet.</p>'+(S.role==='admin'?'<p class="msg">Open the admin panel to publish one.</p><a class="btn" href="#admin" onclick="setTimeout(function(){location.reload()},0)" style="text-align:center;text-decoration:none">Admin panel</a>':'<p class="msg">Please ask the admin to publish the dashboard.</p>')+whoLine());bindWho();return;}
+    var segs=m.segs,parts=new Array(segs.length),done=0,dl=0,keep={};
+    segs.forEach(function(id){keep[id]=1;});
+    function tick(){done++;progress('Loading '+(m.ver||'dashboard')+'… '+done+'/'+segs.length+(dl?(' · downloaded '+dl):''),done/segs.length);}
+    var i=0;
+    function worker(){
+      if(i>=segs.length)return Promise.resolve();
+      var k=i++,id=segs[k];
+      return cget(id).then(function(t){
+        if(t!=null){parts[k]=t;tick();return;}
+        return ref.child('seg/'+id).once('value').then(function(s){
+          var v=s.val();if(typeof v!=='string')throw new Error('Missing piece '+id+' — ask the admin to publish again.');
+          return gunz(unb64(v));
+        }).then(function(t2){return sha(t2).then(function(h){if(h!==id)throw new Error('Piece '+id+' failed its integrity check.');parts[k]=t2;dl++;tick();return cput(id,t2);});});
+      }).then(worker);
+    }
+    return Promise.all([worker(),worker(),worker(),worker()]).then(function(){
+      cprune(keep);
+      var html=parts.join('');
+      progress('Starting…',1);
+      try{S.unsub&&S.unsub();}catch(e){}
+      setTimeout(function(){document.open();document.write(html);document.close();},30);
+    });
+  }).catch(function(e){fail('Could not load the dashboard: '+(e&&e.message||e));});
+}
+
+/* ---------- admin: publish a build / clean up ---------- */
+function adminView(){
+  show('<div class="adm" style="border:0;margin:0;padding:0"><h2>Publish a new dashboard build</h2>'
+    +'<p>Choose the full <b>index.html</b> of the new version. Only the pieces that changed are uploaded; everyone gets the new version the next time they open the dashboard.</p>'
+    +'<input type="file" id="Lf" accept=".html,text/html">'
+    +'<button class="btn" id="Lpub" disabled>Publish</button>'
+    +'<p class="msg" id="Lam"></p>'
+    +'<div class="row"><button class="btn sec" id="Lgc">Clean up unused pieces</button><button class="btn sec" id="Lopen">Open dashboard</button></div></div>'
+    +whoLine());
+  bindWho();
+  var f=document.getElementById('Lf'),pub=document.getElementById('Lpub'),am=document.getElementById('Lam');
+  f.onchange=function(){pub.disabled=!f.files.length;};
+  document.getElementById('Lopen').onclick=function(){location.hash='';location.reload();};
+  pub.onclick=function(){pub.disabled=true;f.disabled=true;publish(f.files[0],function(t,cls){am.className='msg'+(cls?' '+cls:'');am.textContent=t;}).then(function(){f.disabled=false;},function(e){am.className='msg bad';am.textContent='Publish failed: '+(e&&e.message||e);f.disabled=false;pub.disabled=false;});};
+  document.getElementById('Lgc').onclick=function(){var b=this;b.disabled=true;cleanup(function(t){am.className='msg';am.textContent=t;}).then(function(){b.disabled=false;},function(e){am.className='msg bad';am.textContent='Clean-up failed: '+(e&&e.message||e);b.disabled=false;});};
+}
+function publish(file,say){
+  var ref=firebase.database().ref('gli_app');
+  return file.text().then(function(html){
+    if(html.indexOf('FIREBASE_CONFIG')<0||html.indexOf('_gliAuthGate')<0)throw new Error('This file does not look like a GLI Dashboard build with the sign-in gate (V16.49 or later).');
+    var vm=html.match(/class="appver"[^>]*>\s*([^<]+)</),ver=vm?vm[1].trim():'';
+    var segs=split(html);say('Preparing '+segs.length+' pieces…');
+    return Promise.all(segs.map(sha)).then(function(ids){
+      return ref.child('idx').once('value').then(function(sn){
+        var have=sn.val()||{},todo=[],seen={};
+        ids.forEach(function(id,k){if(!have[id]&&!seen[id]){seen[id]=1;todo.push(k);}});
+        var n=0,bytes=0;
+        function up(j){
+          if(j>=todo.length)return Promise.resolve();
+          var k=todo[j];
+          return gz(segs[k]).then(function(buf){bytes+=buf.byteLength;say('Uploading changed piece '+(++n)+' of '+todo.length+'…');
+            return ref.child('seg/'+ids[k]).set(b64(buf));}).then(function(){return ref.child('idx/'+ids[k]).set(true);}).then(function(){return up(j+1);});
+        }
+        return up(0).then(function(){
+          return ref.child('manifest').set({ver:ver,segs:ids,size:html.length,at:firebase.database.ServerValue.TIMESTAMP,by:S.user.email});
+        }).then(function(){say('Published '+(ver||'build')+' · '+todo.length+' of '+ids.length+' pieces uploaded ('+(bytes/1048576).toFixed(1)+' MB).','');});
+      });
+    });
+  });
+}
+function cleanup(say){
+  var ref=firebase.database().ref('gli_app');
+  return ref.child('manifest/segs').once('value').then(function(sn){
+    var keep={};(sn.val()||[]).forEach(function(id){keep[id]=1;});
+    if(!Object.keys(keep).length)throw new Error('No published build — nothing to keep, so nothing was deleted.');
+    return ref.child('idx').once('value').then(function(s2){
+      var upd={},n=0;Object.keys(s2.val()||{}).forEach(function(id){if(!keep[id]){upd['seg/'+id]=null;upd['idx/'+id]=null;n++;}});
+      if(!n){say('Nothing to clean up.');return;}
+      return ref.update(upd).then(function(){say('Removed '+n+' unused pieces.');});
+    });
+  });
+}
+
+start();
+})();
+</script>
+</body>
+</html>
